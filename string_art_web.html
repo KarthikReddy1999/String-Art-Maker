@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>String Art Maker</title>
+  <link rel="stylesheet" href="./string_art_web.css" />
+</head>
+<body>
+  <div class="app">
+    <section class="hero">
+      <h1>String Art Maker</h1>
+      <div class="sub">Upload a photo and watch it build thread-by-thread like real string art.</div>
+    </section>
+
+    <section class="main">
+      <aside class="controls">
+        <div class="field">
+          <label for="upload">Photo</label>
+          <input id="upload" type="file" accept="image/*" />
+        </div>
+
+        <div class="field">
+          <label for="pins">Pins <span id="pinsVal">170</span></label>
+          <input id="pins" type="range" min="80" max="280" value="170" />
+        </div>
+
+        <div class="field">
+          <label for="lines">Total Lines <span id="linesVal">2200</span></label>
+          <input id="lines" type="range" min="600" max="7000" step="100" value="2200" />
+        </div>
+
+        <div class="field">
+          <label for="minGap">Min Pin Gap <span id="minGapVal">12</span></label>
+          <input id="minGap" type="range" min="4" max="40" value="12" />
+        </div>
+
+        <div class="field">
+          <label for="lineStrength">Thread Strength <span id="lineStrengthVal">0.15</span></label>
+          <input id="lineStrength" type="range" min="0.03" max="0.35" step="0.01" value="0.15" />
+        </div>
+
+        <div class="field">
+          <label for="gamma">Contrast Gamma <span id="gammaVal">1.10</span></label>
+          <input id="gamma" type="range" min="0.6" max="2.0" step="0.05" value="1.1" />
+        </div>
+
+        <div class="field">
+          <label for="speed">Lines Per Frame <span id="speedVal">1</span></label>
+          <input id="speed" type="range" min="1" max="12" value="1" />
+        </div>
+
+        <div class="field">
+          <label for="workSize">Work Size (px)</label>
+          <input id="workSize" type="number" value="760" min="280" max="1400" step="20" />
+        </div>
+
+        <div class="actions">
+          <button id="startBtn" class="primary" disabled>Start Render</button>
+          <button id="pauseBtn" class="ghost" disabled>Pause</button>
+          <button id="resetBtn" class="ghost" disabled>Reset</button>
+          <button id="downloadBtn" class="ghost" disabled>Download PNG</button>
+        </div>
+
+        <div class="tips">
+          Tip: start with 170 pins / 2200 lines for speed. For finer details try 220+ pins and 4000+ lines.
+        </div>
+      </aside>
+
+      <section class="canvas-wrap">
+        <div class="canvas-grid">
+          <div class="source-panel">
+            <h2 class="panel-title">Input Preview</h2>
+            <canvas id="sourceCanvas" width="760" height="760"></canvas>
+          </div>
+          <div class="output-panel">
+            <h2 class="panel-title">Thread Build</h2>
+            <canvas id="outputCanvas" width="760" height="760"></canvas>
+          </div>
+        </div>
+
+        <div class="status">
+          <span id="statusText">Upload an image to begin.</span>
+          <span id="progressText">0 / 0 lines</span>
+        </div>
+        <div class="progress"><div id="progressFill"></div></div>
+      </section>
+    </section>
+  </div>
+
+  <script>
+    "use strict";
+
+    const el = {
+      upload: document.getElementById("upload"),
+      pins: document.getElementById("pins"),
+      pinsVal: document.getElementById("pinsVal"),
+      lines: document.getElementById("lines"),
+      linesVal: document.getElementById("linesVal"),
+      minGap: document.getElementById("minGap"),
+      minGapVal: document.getElementById("minGapVal"),
+      lineStrength: document.getElementById("lineStrength"),
+      lineStrengthVal: document.getElementById("lineStrengthVal"),
+      gamma: document.getElementById("gamma"),
+      gammaVal: document.getElementById("gammaVal"),
+      speed: document.getElementById("speed"),
+      speedVal: document.getElementById("speedVal"),
+      workSize: document.getElementById("workSize"),
+      startBtn: document.getElementById("startBtn"),
+      pauseBtn: document.getElementById("pauseBtn"),
+      resetBtn: document.getElementById("resetBtn"),
+      downloadBtn: document.getElementById("downloadBtn"),
+      statusText: document.getElementById("statusText"),
+      progressText: document.getElementById("progressText"),
+      progressFill: document.getElementById("progressFill"),
+      sourceCanvas: document.getElementById("sourceCanvas"),
+      outputCanvas: document.getElementById("outputCanvas")
+    };
+
+    const sourceCtx = el.sourceCanvas.getContext("2d", { willReadFrequently: true });
+    const outputCtx = el.outputCanvas.getContext("2d");
+
+    const state = {
+      image: null,
+      workingSize: 760,
+      pins: [],
+      candidatesByPin: [],
+      residual: null,
+      lineCache: new Map(),
+      currentPin: 0,
+      step: 0,
+      maxSteps: 0,
+      running: false,
+      paused: false,
+      rafId: 0,
+      params: null
+    };
+
+    const syncLabel = (input, label, formatter = (v) => v) => {
+      const fn = () => { label.textContent = formatter(input.value); };
+      input.addEventListener("input", fn);
+      fn();
+    };
+
+    syncLabel(el.pins, el.pinsVal);
+    syncLabel(el.lines, el.linesVal);
+    syncLabel(el.minGap, el.minGapVal);
+    syncLabel(el.lineStrength, el.lineStrengthVal, (v) => Number(v).toFixed(2));
+    syncLabel(el.gamma, el.gammaVal, (v) => Number(v).toFixed(2));
+    syncLabel(el.speed, el.speedVal);
+
+    function setStatus(text) {
+      el.statusText.textContent = text;
+    }
+
+    function setProgress(step, max) {
+      const safeMax = Math.max(max, 1);
+      const pct = (step / safeMax) * 100;
+      el.progressText.textContent = `${step} / ${max} lines`;
+      el.progressFill.style.width = `${pct.toFixed(2)}%`;
+    }
+
+    function fillWhite(ctx, size) {
+      ctx.clearRect(0, 0, size, size);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, size, size);
+    }
+
+    function drawSourcePreview(image, size) {
+      fillWhite(sourceCtx, size);
+      const dim = Math.min(image.width, image.height);
+      const sx = ((image.width - dim) / 2) | 0;
+      const sy = ((image.height - dim) / 2) | 0;
+      sourceCtx.drawImage(image, sx, sy, dim, dim, 0, 0, size, size);
+    }
+
+    function makePins(size, count) {
+      const pins = [];
+      const c = (size - 1) / 2;
+      const r = c - 2;
+      for (let i = 0; i < count; i += 1) {
+        const t = (2 * Math.PI * i) / count;
+        pins.push({
+          x: Math.round(c + r * Math.cos(t)),
+          y: Math.round(c + r * Math.sin(t))
+        });
+      }
+      return pins;
+    }
+
+    function pinDistanceCircular(a, b, n) {
+      const d = Math.abs(a - b);
+      return Math.min(d, n - d);
+    }
+
+    function buildCandidates(pinCount, minGap) {
+      const all = [];
+      for (let i = 0; i < pinCount; i += 1) {
+        const list = [];
+        for (let j = 0; j < pinCount; j += 1) {
+          if (j === i) continue;
+          if (pinDistanceCircular(i, j, pinCount) < minGap) continue;
+          list.push(j);
+        }
+        all.push(list);
+      }
+      return all;
+    }
+
+    function bresenhamIndices(x0, y0, x1, y1, size) {
+      let dx = Math.abs(x1 - x0);
+      let sx = x0 < x1 ? 1 : -1;
+      let dy = -Math.abs(y1 - y0);
+      let sy = y0 < y1 ? 1 : -1;
+      let err = dx + dy;
+      const data = [];
+
+      while (true) {
+        data.push((y0 * size) + x0);
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) {
+          err += dy;
+          x0 += sx;
+        }
+        if (e2 <= dx) {
+          err += dx;
+          y0 += sy;
+        }
+      }
+      return new Uint32Array(data);
+    }
+
+    function lineKey(a, b) {
+      return a < b ? `${a},${b}` : `${b},${a}`;
+    }
+
+    function getLineIndices(a, b) {
+      const key = lineKey(a, b);
+      const cached = state.lineCache.get(key);
+      if (cached) return cached;
+      const pa = state.pins[a];
+      const pb = state.pins[b];
+      const indices = bresenhamIndices(pa.x, pa.y, pb.x, pb.y, state.workingSize);
+      state.lineCache.set(key, indices);
+      return indices;
+    }
+
+    function prepareDarknessMap() {
+      const size = state.workingSize;
+      const imageData = sourceCtx.getImageData(0, 0, size, size).data;
+      const residual = new Float32Array(size * size);
+      const c = (size - 1) / 2;
+      const r2 = (c - 2) * (c - 2);
+      const gamma = Number(el.gamma.value);
+
+      for (let y = 0; y < size; y += 1) {
+        for (let x = 0; x < size; x += 1) {
+          const idx = y * size + x;
+          const p = idx * 4;
+          const lum = (0.299 * imageData[p] + 0.587 * imageData[p + 1] + 0.114 * imageData[p + 2]) / 255;
+          const dark = Math.pow(1 - lum, gamma);
+          const dx = x - c;
+          const dy = y - c;
+          const inCircle = (dx * dx) + (dy * dy) <= r2;
+          residual[idx] = inCircle ? dark : 0;
+        }
+      }
+
+      return residual;
+    }
+
+    function drawThreadLine(fromPin, toPin, lineStrength) {
+      const a = state.pins[fromPin];
+      const b = state.pins[toPin];
+      const alpha = Math.min(0.32, Math.max(0.04, lineStrength * 1.35));
+      outputCtx.strokeStyle = `rgba(12, 12, 12, ${alpha.toFixed(3)})`;
+      outputCtx.lineWidth = 1;
+      outputCtx.beginPath();
+      outputCtx.moveTo(a.x + 0.5, a.y + 0.5);
+      outputCtx.lineTo(b.x + 0.5, b.y + 0.5);
+      outputCtx.stroke();
+    }
+
+    function chooseNextPin(currentPin) {
+      const candidates = state.candidatesByPin[currentPin];
+      let bestPin = -1;
+      let bestScore = -Infinity;
+
+      for (let i = 0; i < candidates.length; i += 1) {
+        const cand = candidates[i];
+        const idxs = getLineIndices(currentPin, cand);
+        let score = 0;
+        for (let j = 0; j < idxs.length; j += 1) {
+          score += state.residual[idxs[j]];
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestPin = cand;
+        }
+      }
+      return bestPin;
+    }
+
+    function applyLine(fromPin, toPin, strength) {
+      const idxs = getLineIndices(fromPin, toPin);
+      for (let i = 0; i < idxs.length; i += 1) {
+        const idx = idxs[i];
+        const v = state.residual[idx] - strength;
+        state.residual[idx] = v > 0 ? v : 0;
+      }
+      drawThreadLine(fromPin, toPin, strength);
+    }
+
+    function stopAnimation() {
+      state.running = false;
+      state.paused = false;
+      if (state.rafId) {
+        cancelAnimationFrame(state.rafId);
+        state.rafId = 0;
+      }
+    }
+
+    function resetOutputCanvas() {
+      fillWhite(outputCtx, state.workingSize);
+      outputCtx.strokeStyle = "rgba(12,12,12,0.16)";
+      outputCtx.lineWidth = 1;
+    }
+
+    function renderLoop() {
+      if (!state.running || state.paused) return;
+
+      const linesPerFrame = Number(el.speed.value);
+      const strength = Number(el.lineStrength.value);
+
+      for (let i = 0; i < linesPerFrame; i += 1) {
+        if (state.step >= state.maxSteps) break;
+        const nextPin = chooseNextPin(state.currentPin);
+        if (nextPin < 0) {
+          state.step = state.maxSteps;
+          break;
+        }
+        applyLine(state.currentPin, nextPin, strength);
+        state.currentPin = nextPin;
+        state.step += 1;
+      }
+
+      setProgress(state.step, state.maxSteps);
+
+      if (state.step >= state.maxSteps) {
+        stopAnimation();
+        el.pauseBtn.textContent = "Pause";
+        setStatus("Render complete. You can download the PNG.");
+        el.downloadBtn.disabled = false;
+        return;
+      }
+
+      state.rafId = requestAnimationFrame(renderLoop);
+    }
+
+    function clearAll() {
+      stopAnimation();
+      state.lineCache.clear();
+      state.residual = null;
+      state.step = 0;
+      state.maxSteps = 0;
+      setProgress(0, 0);
+      fillWhite(outputCtx, state.workingSize);
+      if (state.image) drawSourcePreview(state.image, state.workingSize);
+      setStatus("Settings updated. Press Start Render.");
+      el.pauseBtn.disabled = true;
+      el.downloadBtn.disabled = true;
+    }
+
+    async function loadImage(file) {
+      if (!file) return;
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      await new Promise((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Could not load image"));
+        img.src = url;
+      });
+      URL.revokeObjectURL(url);
+      state.image = img;
+
+      const requestedSize = Number(el.workSize.value);
+      state.workingSize = Number.isFinite(requestedSize) ? Math.max(280, Math.min(1400, requestedSize)) : 760;
+      el.workSize.value = String(state.workingSize);
+
+      el.sourceCanvas.width = state.workingSize;
+      el.sourceCanvas.height = state.workingSize;
+      el.outputCanvas.width = state.workingSize;
+      el.outputCanvas.height = state.workingSize;
+
+      drawSourcePreview(img, state.workingSize);
+      fillWhite(outputCtx, state.workingSize);
+
+      el.startBtn.disabled = false;
+      el.resetBtn.disabled = false;
+      el.pauseBtn.disabled = true;
+      el.downloadBtn.disabled = true;
+      setStatus("Image loaded. Press Start Render.");
+      setProgress(0, 0);
+    }
+
+    function setupRenderState() {
+      if (!state.image) return false;
+
+      state.lineCache = new Map();
+      state.residual = prepareDarknessMap();
+      state.pins = makePins(state.workingSize, Number(el.pins.value));
+      state.candidatesByPin = buildCandidates(state.pins.length, Number(el.minGap.value));
+      state.currentPin = 0;
+      state.step = 0;
+      state.maxSteps = Number(el.lines.value);
+      state.running = true;
+      state.paused = false;
+      resetOutputCanvas();
+      setProgress(0, state.maxSteps);
+      setStatus("Rendering thread path...");
+      el.pauseBtn.disabled = false;
+      el.downloadBtn.disabled = true;
+      return true;
+    }
+
+    el.upload.addEventListener("change", (e) => {
+      loadImage(e.target.files?.[0]).catch((err) => {
+        console.error(err);
+        setStatus("Could not read this image. Try another file.");
+      });
+    });
+
+    el.startBtn.addEventListener("click", () => {
+      if (!state.image) {
+        setStatus("Please upload an image first.");
+        return;
+      }
+      stopAnimation();
+      const ok = setupRenderState();
+      if (!ok) return;
+      el.pauseBtn.textContent = "Pause";
+      state.rafId = requestAnimationFrame(renderLoop);
+    });
+
+    el.pauseBtn.addEventListener("click", () => {
+      if (!state.running) return;
+      state.paused = !state.paused;
+      if (state.paused) {
+        el.pauseBtn.textContent = "Resume";
+        setStatus("Paused.");
+      } else {
+        el.pauseBtn.textContent = "Pause";
+        setStatus("Rendering thread path...");
+        state.rafId = requestAnimationFrame(renderLoop);
+      }
+    });
+
+    el.resetBtn.addEventListener("click", () => {
+      clearAll();
+    });
+
+    el.downloadBtn.addEventListener("click", () => {
+      const a = document.createElement("a");
+      a.href = el.outputCanvas.toDataURL("image/png");
+      a.download = "string_art_maker_output.png";
+      a.click();
+    });
+
+    [el.pins, el.lines, el.minGap, el.lineStrength, el.gamma, el.speed, el.workSize].forEach((input) => {
+      input.addEventListener("change", () => {
+        if (!state.image) return;
+        clearAll();
+      });
+    });
+
+    fillWhite(sourceCtx, state.workingSize);
+    fillWhite(outputCtx, state.workingSize);
+    setProgress(0, 0);
+  </script>
+</body>
+</html>

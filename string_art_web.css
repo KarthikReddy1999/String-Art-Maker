@@ -1,0 +1,227 @@
+:root {
+  --bg: #f8f3ea;
+  --panel: #fffdf9;
+  --ink: #2f261c;
+  --muted: #6f6357;
+  --accent: #b36f41;
+  --accent-soft: #ead4c4;
+  --line: #d9cabc;
+  --shadow: 0 18px 40px rgba(47, 38, 28, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 15% -10%, #fff8ed 0%, transparent 50%),
+    radial-gradient(circle at 90% 0%, #f3e4d1 0%, transparent 45%),
+    linear-gradient(180deg, #f8f3ea 0%, #f4ebdf 100%);
+  min-height: 100vh;
+  padding: 28px 16px 40px;
+}
+
+.app {
+  max-width: 1700px;
+  margin: 0 auto;
+  display: grid;
+  gap: 16px;
+}
+
+.hero {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 18px 20px;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.4rem, 1.2rem + 1.2vw, 2rem);
+  letter-spacing: 0.01em;
+}
+
+.sub {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.97rem;
+}
+
+.main {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(220px, 285px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.controls,
+.canvas-wrap {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.controls {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 0.88rem;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field input[type="range"],
+.field input[type="number"],
+.field input[type="file"] {
+  width: 100%;
+}
+
+input[type="range"] {
+  accent-color: var(--accent);
+}
+
+.actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+button {
+  border: none;
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms ease, filter 120ms ease;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ghost {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.45) opacity(0.6);
+}
+
+.canvas-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(110px, 180px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.source-panel {
+  max-width: 180px;
+}
+
+.output-panel {
+  width: 100%;
+}
+
+.panel-title {
+  margin: 0 0 10px;
+  font-size: 0.93rem;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+
+#outputCanvas {
+  width: min(100%, 1400px);
+  max-height: 82vh;
+  margin: 0 auto;
+}
+
+.canvas-wrap {
+  min-height: 78vh;
+}
+
+.status {
+  margin-top: 10px;
+  font-size: 0.92rem;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.progress {
+  height: 9px;
+  width: 100%;
+  border-radius: 999px;
+  margin-top: 10px;
+  overflow: hidden;
+  background: #efe5d9;
+}
+
+.progress > div {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #9f5b31 0%, #cb8e61 100%);
+  transition: width 140ms linear;
+}
+
+.tips {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+  .main {
+    grid-template-columns: 1fr;
+  }
+
+  .canvas-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .source-panel {
+    max-width: 260px;
+  }
+
+  #outputCanvas {
+    max-height: none;
+  }
+
+  .canvas-wrap {
+    min-height: 0;
+  }
+}
