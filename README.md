@@ -1,4 +1,4 @@
-# String Art Maker
+# String Art Maker (upload image and see the magic)
 
 Create string-art style portraits from photos in two ways:
 
